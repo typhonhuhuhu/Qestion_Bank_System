@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 题库生成与自测系统</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero" aria-label="应用介绍">
+      <p class="eyebrow">AI Study Lab</p>
+      <h1>AI 题库生成与自测系统</h1>
+      <p class="subtitle">上传资料、生成题库、沉浸练习，并把复习结果留在你的浏览器中。</p>
+    </section>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+    <section id="settings-view" class="view card" aria-labelledby="settings-title">
+      <h2 id="settings-title">API 配置</h2>
+      <p class="hint">请填写 OpenAI-compatible Chat Completions API 信息。API Key 只会保存在当前浏览器。</p>
+      <div class="field-group">
+        <label for="api-base-url">API Base URL</label>
+        <input id="api-base-url" type="url" placeholder="https://api.openai.com/v1" autocomplete="off">
+      </div>
+      <div class="field-group">
+        <label for="model-name">模型名称</label>
+        <input id="model-name" type="text" placeholder="gpt-4o-mini" autocomplete="off">
+      </div>
+      <div class="field-group">
+        <label for="api-key">API Key</label>
+        <input id="api-key" type="password" placeholder="仅保存在 localStorage" autocomplete="off">
+      </div>
+      <div class="actions">
+        <button id="save-settings-btn" class="primary-btn" type="button">保存并继续</button>
+        <button id="clear-settings-btn" class="secondary-btn" type="button">清空配置</button>
+      </div>
+    </section>
+
+    <section id="source-view" class="view card" aria-labelledby="source-title" hidden>
+      <h2 id="source-title">上传资料</h2>
+      <p class="hint">上传 PDF 或直接粘贴学习资料。PDF 解析在浏览器端完成，解析失败时可复制文本后粘贴。</p>
+      <div class="field-group">
+        <label for="pdf-files">PDF 文件</label>
+        <input id="pdf-files" type="file" accept="application/pdf" multiple>
+      </div>
+      <div class="field-group">
+        <label for="source-text">学习资料文本</label>
+        <textarea id="source-text" rows="12" placeholder="在这里粘贴教材、讲义、笔记或 PDF 复制文本"></textarea>
+      </div>
+      <div class="actions">
+        <button id="parse-pdf-btn" class="primary-btn" type="button">解析 PDF 并继续</button>
+        <button id="use-text-btn" class="primary-btn outline" type="button">使用文本继续</button>
+        <button id="back-to-settings-btn" class="secondary-btn" type="button">返回</button>
+        <button id="clear-workspace-btn" class="danger-btn" type="button">清空工作区</button>
+      </div>
+    </section>
+
+    <section id="requirements-view" class="view card" aria-labelledby="requirements-title" hidden>
+      <h2 id="requirements-title">出题要求</h2>
+      <p class="hint">说明考试范围、题目风格、难度、侧重点和易错项，AI 将据此生成知识点与题库。</p>
+      <div class="field-group">
+        <label for="requirement-text">出题需求</label>
+        <textarea id="requirement-text" rows="8" placeholder="例如：覆盖第 1-3 章，偏基础与概念辨析，重点考察易错定义和计算步骤"></textarea>
+      </div>
+      <div class="field-group">
+        <label for="topic-input">课程/主题</label>
+        <input id="topic-input" type="text" placeholder="例如：数据结构、宏观经济学、细胞生物学">
+      </div>
+      <div class="number-grid">
+        <div class="field-group">
+          <label for="single-count">单选题数量</label>
+          <input id="single-count" type="number" min="0" max="50" value="5">
+        </div>
+        <div class="field-group">
+          <label for="multiple-count">多选题数量</label>
+          <input id="multiple-count" type="number" min="0" max="50" value="3">
+        </div>
+        <div class="field-group">
+          <label for="short-count">简答题数量</label>
+          <input id="short-count" type="number" min="0" max="50" value="2">
+        </div>
+        <div class="field-group">
+          <label for="essay-count">论述题数量</label>
+          <input id="essay-count" type="number" min="0" max="50" value="1">
+        </div>
+      </div>
+      <div class="actions">
+        <button id="generate-bank-btn" class="primary-btn" type="button">生成题库</button>
+        <button id="import-bank-btn" class="secondary-btn" type="button">导入已有题库 JSON</button>
+        <button id="back-to-source-btn" class="secondary-btn" type="button">返回</button>
+      </div>
+      <input id="import-bank-file" class="visually-hidden" type="file" accept="application/json,.json">
+    </section>
+
+    <section id="knowledge-view" class="view card" aria-labelledby="knowledge-title" hidden>
+      <h2 id="knowledge-title">确认知识点</h2>
+      <p class="hint">请先浏览 AI 提炼的知识点，确认无误后开始刷题。</p>
+      <div id="knowledge-list" class="content-list"></div>
+      <div class="actions">
+        <button id="start-practice-btn" class="primary-btn" type="button">开始刷题</button>
+        <button id="back-to-requirements-btn" class="secondary-btn" type="button">返回</button>
+      </div>
+    </section>
+
+    <section id="practice-view" class="view card wide-card" aria-labelledby="practice-title" hidden>
+      <h2 id="practice-title">开始刷题</h2>
+      <div class="filter-row" role="group" aria-label="题型筛选">
+        <button class="filter-btn active" type="button" data-filter="all">全部</button>
+        <button class="filter-btn" type="button" data-filter="single">单选</button>
+        <button class="filter-btn" type="button" data-filter="multiple">多选</button>
+        <button class="filter-btn" type="button" data-filter="short">简答</button>
+        <button class="filter-btn" type="button" data-filter="essay">论述</button>
+      </div>
+      <div id="question-container" class="question-stack"></div>
+      <div class="actions">
+        <button id="show-results-btn" class="primary-btn" type="button">查看结果</button>
+        <button id="back-to-knowledge-btn" class="secondary-btn" type="button">返回</button>
+      </div>
+    </section>
+
+    <section id="results-view" class="view card" aria-labelledby="results-title" hidden>
+      <h2 id="results-title">结果与导出</h2>
+      <div id="results-summary" class="result-grid"></div>
+      <div id="weak-points" class="content-list"></div>
+      <div class="actions">
+        <button id="export-bank-btn" class="primary-btn" type="button">导出题库 JSON</button>
+        <button id="import-bank-results-btn" class="secondary-btn" type="button">导入已有题库 JSON</button>
+        <button id="back-to-practice-btn" class="secondary-btn" type="button">返回</button>
+        <button id="restart-btn" class="danger-btn" type="button">重新开始</button>
+      </div>
+      <input id="import-bank-file-results" class="visually-hidden" type="file" accept="application/json,.json">
+    </section>
+  </main>
+</body>
+</html>
