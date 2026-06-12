@@ -299,9 +299,101 @@ async function generateQuestionBank() {
 
 function buildGenerationMessages() {
   const counts = state.requirements.counts;
-  const prompt = `请根据学习资料生成题库。必须只输出合法 JSON，不要输出 Markdown、解释或代码块。\n课程/主题：${state.requirements.topic || '未填写'}\n出题需求：${state.requirements.text || '请覆盖核心知识点，难度适中'}\n数量要求：单选 ${counts.single}，多选 ${counts.multiple}，简答 ${counts.short}，论述 ${counts.essay}。\nJSON 结构必须为：{ "knowledgePoints": [{ "title": "", "summary": "", "sourceHint": "" }], "questions": [] }。\n题目 type 只能是 single、multiple、short、essay。客观题需要 options、answer、explanation、knowledgePoint、sourceHint、errorPoint、relatedKnowledge、difficulty；主观题需要 referenceAnswer、scoringPoints、knowledgePoint、sourceHint、errorPoint、relatedKnowledge、difficulty。\n学习资料：\n${state.sourceText.slice(0, 52000)}`;
+  const schemaExample = {
+    knowledgePoints: [
+      {
+        title: '知识点标题',
+        summary: '知识点说明',
+        sourceHint: '来自哪份资料、哪一页或原文线索'
+      }
+    ],
+    questions: [
+      {
+        id: 'q1',
+        type: 'single',
+        stem: '题干，必须使用英文键名 stem，不要使用 question/title/content/text/prompt/题干/问题 等键名表示题干',
+        options: [
+          { label: 'A', text: '选项内容' },
+          { label: 'B', text: '选项内容' },
+          { label: 'C', text: '选项内容' },
+          { label: 'D', text: '选项内容' }
+        ],
+        answer: 'A',
+        explanation: '解析',
+        knowledgePoint: '对应知识点',
+        sourceHint: '资料来源线索',
+        errorPoint: '常见错误点',
+        relatedKnowledge: ['相关知识点'],
+        difficulty: '基础'
+      },
+      {
+        id: 'q2',
+        type: 'multiple',
+        stem: '题干，必须使用英文键名 stem',
+        options: [
+          { label: 'A', text: '选项内容' },
+          { label: 'B', text: '选项内容' },
+          { label: 'C', text: '选项内容' },
+          { label: 'D', text: '选项内容' }
+        ],
+        answer: ['A', 'C'],
+        explanation: '解析',
+        knowledgePoint: '对应知识点',
+        sourceHint: '资料来源线索',
+        errorPoint: '常见错误点',
+        relatedKnowledge: ['相关知识点'],
+        difficulty: '提高'
+      },
+      {
+        id: 'q3',
+        type: 'short',
+        stem: '题干，必须使用英文键名 stem',
+        referenceAnswer: '参考答案',
+        scoringPoints: [{ point: '采分点', score: 2 }],
+        knowledgePoint: '对应知识点',
+        sourceHint: '资料来源线索',
+        errorPoint: '常见错误点',
+        relatedKnowledge: ['相关知识点'],
+        difficulty: '基础'
+      },
+      {
+        id: 'q4',
+        type: 'essay',
+        stem: '题干，必须使用英文键名 stem',
+        referenceAnswer: '参考答案',
+        scoringPoints: [{ point: '采分点', score: 5 }],
+        knowledgePoint: '对应知识点',
+        sourceHint: '资料来源线索',
+        errorPoint: '常见错误点',
+        relatedKnowledge: ['相关知识点'],
+        difficulty: '综合'
+      }
+    ]
+  };
+  const prompt = `请根据学习资料生成题库。必须只输出合法 JSON，不要输出 Markdown、解释或代码块。
+
+硬性要求：
+1. 必须返回英文键名 JSON，禁止使用中文键名。
+2. 每一道题必须使用英文键名 stem 表示题干；不要用 question、title、content、text、prompt、题干、问题 等键名表示题干。
+3. 所有题目必须包含：id、type、stem、knowledgePoint、sourceHint、errorPoint、relatedKnowledge、difficulty。
+4. 客观题 single 和 multiple 还必须包含：options、answer、explanation。
+5. 主观题 short 和 essay 还必须包含：referenceAnswer、scoringPoints。
+6. type 只能是 single、multiple、short、essay。
+7. options 必须是对象数组，格式为 [{ "label": "A", "text": "选项内容" }]；不要返回纯字符串数组。
+8. single 的 answer 必须是选项 label 字符串，例如 "A"；multiple 的 answer 必须是选项 label 字符串数组，例如 ["A", "C"]。
+9. relatedKnowledge 必须是字符串数组；scoringPoints 必须是对象数组。
+
+课程/主题：${state.requirements.topic || '未填写'}
+出题需求：${state.requirements.text || '请覆盖核心知识点，难度适中'}
+数量要求：单选 ${counts.single}，多选 ${counts.multiple}，简答 ${counts.short}，论述 ${counts.essay}。
+
+请严格参考以下完整 JSON 示例的字段结构，替换为基于学习资料生成的内容：
+${JSON.stringify(schemaExample, null, 2)}
+
+学习资料：
+${state.sourceText.slice(0, 52000)}`;
   return [
-    { role: 'system', content: '你是严谨的大学课程助教，只返回可被 JSON.parse 解析的 JSON。' },
+    { role: 'system', content: '你是严谨的大学课程助教，只返回可被 JSON.parse 解析的英文键名 JSON。' },
     { role: 'user', content: prompt }
   ];
 }
@@ -337,6 +429,99 @@ function makeSafeQuestionId(rawId, index, usedIds) {
   return candidate;
 }
 
+function getFirstNonEmpty(...values) {
+  return values.find((value) => typeof value === 'string' && value.trim())?.trim() || '';
+}
+
+function normalizeOptions(options) {
+  if (!Array.isArray(options)) return [];
+  const labels = ['A', 'B', 'C', 'D', 'E', 'F'];
+  return options.map((option, index) => {
+    const fallbackLabel = labels[index] || String(index + 1);
+    if (typeof option === 'string') {
+      return { label: fallbackLabel, text: option.trim() };
+    }
+    if (!option || typeof option !== 'object') {
+      return { label: fallbackLabel, text: '' };
+    }
+    return {
+      label: getFirstNonEmpty(option.label, option.标签, option.key, option.name) || fallbackLabel,
+      text: getFirstNonEmpty(option.text, option.content, option.内容, option.option, option.value, option.选项)
+    };
+  }).filter((option) => option.text);
+}
+
+function normalizeAnswer(answer, options, type) {
+  const normalizeOne = (value) => {
+    const text = String(value ?? '').trim();
+    if (!text) return '';
+    const directLabel = options.find((option) => option.label === text);
+    if (directLabel) return directLabel.label;
+    const caseInsensitiveLabel = options.find((option) => option.label.toLowerCase() === text.toLowerCase());
+    if (caseInsensitiveLabel) return caseInsensitiveLabel.label;
+    const matchedByText = options.find((option) => option.text.trim() === text);
+    if (matchedByText) return matchedByText.label;
+    const matchedByIncludedText = options.find((option) => option.text.includes(text) || text.includes(option.text));
+    return matchedByIncludedText ? matchedByIncludedText.label : text;
+  };
+  if (type === 'multiple') {
+    const values = Array.isArray(answer) ? answer : String(answer ?? '').split(/[、,，;；\s]+/).filter(Boolean);
+    return values.map(normalizeOne).filter(Boolean);
+  }
+  return normalizeOne(answer);
+}
+
+function normalizeScoringPoints(scoringPoints) {
+  if (!Array.isArray(scoringPoints)) return [];
+  return scoringPoints.map((item, index) => {
+    if (typeof item === 'string') {
+      return { point: item, score: 0 };
+    }
+    if (!item || typeof item !== 'object') {
+      return { point: `采分点 ${index + 1}`, score: 0 };
+    }
+    return {
+      point: getFirstNonEmpty(item.point, item.采分点, item.text, item.content, item.内容) || `采分点 ${index + 1}`,
+      score: Number(item.score ?? item.分值 ?? item.points ?? 0) || 0
+    };
+  });
+}
+
+function normalizeQuestion(question, index, usedIds) {
+  const stem = getFirstNonEmpty(
+    question.stem,
+    question.question,
+    question.title,
+    question.text,
+    question.content,
+    question.prompt,
+    question['题干'],
+    question['问题']
+  );
+  if (!stem) {
+    throw new Error(`第 ${index + 1} 道题缺少题干。`);
+  }
+  const type = getFirstNonEmpty(question.type, question.类型);
+  const id = makeSafeQuestionId(question.id, index, usedIds);
+  const options = normalizeOptions(question.options || question.选项 || []);
+  const rawAnswer = question.answer ?? question.答案 ?? '';
+  return {
+    id,
+    type,
+    stem,
+    options,
+    answer: normalizeAnswer(rawAnswer, options, type),
+    explanation: getFirstNonEmpty(question.explanation, question.解析),
+    referenceAnswer: getFirstNonEmpty(question.referenceAnswer, question.参考答案, question.answerText, question.solution),
+    scoringPoints: normalizeScoringPoints(question.scoringPoints || question.采分点),
+    knowledgePoint: getFirstNonEmpty(question.knowledgePoint, question.知识点),
+    sourceHint: getFirstNonEmpty(question.sourceHint, question.资料来源, question.来源) || '暂无来源线索',
+    errorPoint: getFirstNonEmpty(question.errorPoint, question.易错点, question.错误点) || '暂无',
+    relatedKnowledge: Array.isArray(question.relatedKnowledge || question.相关知识点) ? (question.relatedKnowledge || question.相关知识点) : [],
+    difficulty: getFirstNonEmpty(question.difficulty, question.难度) || '未标注'
+  };
+}
+
 function validateQuestionBank(data) {
   if (!data || !Array.isArray(data.knowledgePoints) || !Array.isArray(data.questions)) {
     throw new Error('题库 JSON 必须包含 knowledgePoints 和 questions 数组。');
@@ -345,16 +530,15 @@ function validateQuestionBank(data) {
   const usedIds = new Set();
   const questions = data.questions.map((question, index) => {
     if (!question || typeof question !== 'object') throw new Error(`第 ${index + 1} 道题格式不合法。`);
-    if (!allowedTypes.has(question.type)) throw new Error(`第 ${index + 1} 道题 type 不合法。`);
-    if (!question.stem) throw new Error(`第 ${index + 1} 道题缺少题干。`);
-    const id = makeSafeQuestionId(question.id, index, usedIds);
-    return { relatedKnowledge: [], difficulty: '', ...question, id };
+    const normalized = normalizeQuestion(question, index, usedIds);
+    if (!allowedTypes.has(normalized.type)) throw new Error(`第 ${index + 1} 道题 type 不合法。`);
+    return normalized;
   });
   return {
     knowledgePoints: data.knowledgePoints.map((point) => ({
-      title: point?.title || '未命名知识点',
-      summary: point?.summary || '暂无说明',
-      sourceHint: point?.sourceHint || '暂无来源线索'
+      title: getFirstNonEmpty(point?.title, point?.标题) || '未命名知识点',
+      summary: getFirstNonEmpty(point?.summary, point?.说明) || '暂无说明',
+      sourceHint: getFirstNonEmpty(point?.sourceHint, point?.来源, point?.资料来源) || '暂无来源线索'
     })),
     questions
   };
