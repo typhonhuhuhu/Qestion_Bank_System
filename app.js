@@ -382,6 +382,7 @@ function buildGenerationMessages() {
 7. options 必须是对象数组，格式为 [{ "label": "A", "text": "选项内容" }]；不要返回纯字符串数组。
 8. single 的 answer 必须是选项 label 字符串，例如 "A"；multiple 的 answer 必须是选项 label 字符串数组，例如 ["A", "C"]。
 9. relatedKnowledge 必须是字符串数组；scoringPoints 必须是对象数组。
+10. questions 必须是扁平题目数组，不要按题型分组，不要返回 { "single": [...] } 这类嵌套结构。
 
 课程/主题：${state.requirements.topic || '未填写'}
 出题需求：${state.requirements.text || '请覆盖核心知识点，难度适中'}
@@ -431,6 +432,121 @@ function makeSafeQuestionId(rawId, index, usedIds) {
 
 function getFirstNonEmpty(...values) {
   return values.find((value) => typeof value === 'string' && value.trim())?.trim() || '';
+}
+
+function getQuestionStemValue(question) {
+  return getFirstNonEmpty(
+    question.stem,
+    question.question,
+    question.title,
+    question.text,
+    question.content,
+    question.prompt,
+    question.questionText,
+    question.question_text,
+    question.stemText,
+    question.stem_text,
+    question.body,
+    question.description,
+    question.name,
+    question.item,
+    question.q,
+    question['题干'],
+    question['问题'],
+    question['题目'],
+    question['题目内容'],
+    question['问题描述']
+  );
+}
+
+function hasQuestionLikeFields(item) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+  return Boolean(
+    getQuestionStemValue(item) ||
+    item.options ||
+    item.选项 ||
+    item.answer ||
+    item.答案 ||
+    item.referenceAnswer ||
+    item.参考答案 ||
+    item.scoringPoints ||
+    item.采分点 ||
+    item.knowledgePoint ||
+    item.知识点
+  );
+}
+
+
+function normalizeQuestionType(type) {
+  const normalized = String(type || '').trim().toLowerCase();
+  if (!normalized) return '';
+  if (normalized === 'single' || normalized.includes('single') || normalized.includes('单选')) return 'single';
+  if (normalized === 'multiple' || normalized.includes('multiple') || normalized.includes('multi') || normalized.includes('多选')) return 'multiple';
+  if (normalized === 'short' || normalized.includes('short') || normalized.includes('brief') || normalized.includes('简答')) return 'short';
+  if (normalized === 'essay' || normalized.includes('essay') || normalized.includes('论述')) return 'essay';
+  return normalized;
+}
+
+function inferTypeFromKey(key) {
+  const normalized = String(key || '').toLowerCase();
+  if (normalized.includes('multiple') || normalized.includes('multi') || normalized.includes('多选')) return 'multiple';
+  if (normalized.includes('single') || normalized.includes('choice') || normalized.includes('单选')) return 'single';
+  if (normalized.includes('short') || normalized.includes('brief') || normalized.includes('简答')) return 'short';
+  if (normalized.includes('essay') || normalized.includes('论述')) return 'essay';
+  return '';
+}
+
+function collectQuestionItems(source, inheritedType = '') {
+  if (Array.isArray(source)) {
+    return source.flatMap((item) => collectQuestionItems(item, inheritedType));
+  }
+  if (!source || typeof source !== 'object') return [];
+  const directType = normalizeQuestionType(getFirstNonEmpty(source.type, source.类型) || inheritedType);
+  const nestedKeys = [
+    'questions',
+    'questionList',
+    'items',
+    'list',
+    'children',
+    '题目',
+    '题目列表',
+    '单选题',
+    '多选题',
+    '简答题',
+    '论述题',
+    'single',
+    'multiple',
+    'short',
+    'essay',
+    'singleQuestions',
+    'multipleQuestions',
+    'shortQuestions',
+    'essayQuestions',
+    'singleChoiceQuestions',
+    'multipleChoiceQuestions'
+  ];
+  const nestedItems = nestedKeys.flatMap((key) => {
+    const value = source[key];
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((item) => collectQuestionItems(item, inferTypeFromKey(key) || directType));
+  });
+  if (hasQuestionLikeFields(source)) {
+    return [{ ...source, type: directType || source.type || source.类型 }];
+  }
+  return nestedItems;
+}
+
+function normalizeQuestionsSource(data) {
+  const direct = Array.isArray(data.questions) || (data.questions && typeof data.questions === 'object')
+    ? collectQuestionItems(data.questions)
+    : [];
+  if (direct.length) return direct;
+  return collectQuestionItems({
+    singleQuestions: data.singleQuestions || data.single || data['单选题'],
+    multipleQuestions: data.multipleQuestions || data.multiple || data['多选题'],
+    shortQuestions: data.shortQuestions || data.short || data['简答题'],
+    essayQuestions: data.essayQuestions || data.essay || data['论述题']
+  });
 }
 
 function normalizeOptions(options) {
@@ -488,20 +604,11 @@ function normalizeScoringPoints(scoringPoints) {
 }
 
 function normalizeQuestion(question, index, usedIds) {
-  const stem = getFirstNonEmpty(
-    question.stem,
-    question.question,
-    question.title,
-    question.text,
-    question.content,
-    question.prompt,
-    question['题干'],
-    question['问题']
-  );
+  const stem = getQuestionStemValue(question);
   if (!stem) {
     throw new Error(`第 ${index + 1} 道题缺少题干。`);
   }
-  const type = getFirstNonEmpty(question.type, question.类型);
+  const type = normalizeQuestionType(getFirstNonEmpty(question.type, question.类型));
   const id = makeSafeQuestionId(question.id, index, usedIds);
   const options = normalizeOptions(question.options || question.选项 || []);
   const rawAnswer = question.answer ?? question.答案 ?? '';
@@ -523,12 +630,16 @@ function normalizeQuestion(question, index, usedIds) {
 }
 
 function validateQuestionBank(data) {
-  if (!data || !Array.isArray(data.knowledgePoints) || !Array.isArray(data.questions)) {
-    throw new Error('题库 JSON 必须包含 knowledgePoints 和 questions 数组。');
+  if (!data || !Array.isArray(data.knowledgePoints)) {
+    throw new Error('题库 JSON 必须包含 knowledgePoints 数组。');
+  }
+  const questionItems = normalizeQuestionsSource(data);
+  if (!questionItems.length) {
+    throw new Error('题库 JSON 必须包含 questions 数组或可识别的题目列表。');
   }
   const allowedTypes = new Set(['single', 'multiple', 'short', 'essay']);
   const usedIds = new Set();
-  const questions = data.questions.map((question, index) => {
+  const questions = questionItems.map((question, index) => {
     if (!question || typeof question !== 'object') throw new Error(`第 ${index + 1} 道题格式不合法。`);
     const normalized = normalizeQuestion(question, index, usedIds);
     if (!allowedTypes.has(normalized.type)) throw new Error(`第 ${index + 1} 道题 type 不合法。`);
