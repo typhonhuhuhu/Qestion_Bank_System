@@ -374,15 +374,18 @@ function buildGenerationMessages() {
 
 硬性要求：
 1. 必须返回英文键名 JSON，禁止使用中文键名。
-2. 每一道题必须使用英文键名 stem 表示题干；不要用 question、title、content、text、prompt、题干、问题 等键名表示题干。
-3. 所有题目必须包含：id、type、stem、knowledgePoint、sourceHint、errorPoint、relatedKnowledge、difficulty。
-4. 客观题 single 和 multiple 还必须包含：options、answer、explanation。
-5. 主观题 short 和 essay 还必须包含：referenceAnswer、scoringPoints。
-6. type 只能是 single、multiple、short、essay。
-7. options 必须是对象数组，格式为 [{ "label": "A", "text": "选项内容" }]；不要返回纯字符串数组。
-8. single 的 answer 必须是选项 label 字符串，例如 "A"；multiple 的 answer 必须是选项 label 字符串数组，例如 ["A", "C"]。
-9. relatedKnowledge 必须是字符串数组；scoringPoints 必须是对象数组。
-10. questions 必须是扁平题目数组，不要按题型分组，不要返回 { "single": [...] } 这类嵌套结构。
+2. 所有面向用户显示的内容必须使用简体中文，包括 knowledgePoints 的 title/summary/sourceHint，以及每道题的 stem、options[].text、explanation、referenceAnswer、scoringPoints[].point、knowledgePoint、sourceHint、errorPoint、relatedKnowledge、difficulty。
+3. 如果学习资料是英文或其它语言，必须先理解资料，再将题干、选项、解析、参考答案和知识点翻译/改写成自然、准确的简体中文；必要时可在中文术语后保留英文术语括注，例如“标准误（standard error）”。
+4. 不要输出英文整句题干或英文整句选项；除专有名词、公式、缩写和术语括注外，题目内容应为中文。
+5. 每一道题必须使用英文键名 stem 表示题干；不要用 question、title、content、text、prompt、题干、问题 等键名表示题干。
+6. 所有题目必须包含：id、type、stem、knowledgePoint、sourceHint、errorPoint、relatedKnowledge、difficulty。
+7. 客观题 single 和 multiple 还必须包含：options、answer、explanation。
+8. 主观题 short 和 essay 还必须包含：referenceAnswer、scoringPoints。
+9. type 只能是 single、multiple、short、essay。
+10. options 必须是对象数组，格式为 [{ "label": "A", "text": "选项内容" }]；不要返回纯字符串数组。
+11. single 的 answer 必须是选项 label 字符串，例如 "A"；multiple 的 answer 必须是选项 label 字符串数组，例如 ["A", "C"]。
+12. relatedKnowledge 必须是字符串数组；scoringPoints 必须是对象数组。
+13. questions 必须是扁平题目数组，不要按题型分组，不要返回 { "single": [...] } 这类嵌套结构。
 
 课程/主题：${state.requirements.topic || '未填写'}
 出题需求：${state.requirements.text || '请覆盖核心知识点，难度适中'}
@@ -394,7 +397,7 @@ ${JSON.stringify(schemaExample, null, 2)}
 学习资料：
 ${state.sourceText.slice(0, 52000)}`;
   return [
-    { role: 'system', content: '你是严谨的大学课程助教，只返回可被 JSON.parse 解析的英文键名 JSON。' },
+    { role: 'system', content: '你是严谨的中文大学课程助教。只返回可被 JSON.parse 解析的英文键名 JSON，但所有题目、选项、解析、参考答案和知识点内容必须使用简体中文。' },
     { role: 'user', content: prompt }
   ];
 }
@@ -856,10 +859,10 @@ async function submitSubjectiveQuestion(question, button) {
 
 function buildGradingMessages(question, userAnswer) {
   return [
-    { role: 'system', content: '你是严谨的大学课程阅卷老师。只返回合法 JSON，不要 Markdown。' },
+    { role: 'system', content: '你是严谨的中文大学课程阅卷老师。只返回合法 JSON，不要 Markdown；feedback、errorPoint、pointBreakdown.comment 等内容必须使用简体中文。' },
     {
       role: 'user',
-      content: `请根据参考答案和采分点评阅学生答案，只输出 JSON：{ "score": 数字, "totalScore": 数字, "feedback": "反馈", "errorPoint": "主要错误点", "pointBreakdown": [{ "point": "采分点", "earned": 数字, "comment": "说明" }] }。\n题干：${question.stem}\n参考答案：${question.referenceAnswer || ''}\n采分点：${JSON.stringify(question.scoringPoints || [])}\n总分：${getTotalScore(question)}\n学生答案：${userAnswer}`
+      content: `请根据参考答案和采分点评阅学生答案，所有反馈内容必须使用简体中文，只输出 JSON：{ "score": 数字, "totalScore": 数字, "feedback": "反馈", "errorPoint": "主要错误点", "pointBreakdown": [{ "point": "采分点", "earned": 数字, "comment": "说明" }] }。\n题干：${question.stem}\n参考答案：${question.referenceAnswer || ''}\n采分点：${JSON.stringify(question.scoringPoints || [])}\n总分：${getTotalScore(question)}\n学生答案：${userAnswer}`
     }
   ];
 }
